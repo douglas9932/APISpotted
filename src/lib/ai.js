@@ -43,7 +43,9 @@ async function callGemini(message) {
   if (!apiKey) throw new Error('GEMINI_API_KEY não configurada');
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  // modelo padrão atualizado: gemini-2.5-flash bloqueado para novas chaves, usar gemini-3.6-flash
+  const modelName = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
+  const model = genAI.getGenerativeModel({ model: modelName });
 
   const result = await model.generateContent(buildPrompt(message));
   return result.response.text();
