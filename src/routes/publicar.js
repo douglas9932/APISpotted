@@ -7,7 +7,7 @@ import { logErro } from '../lib/logger.js';
 // O front NÃO fala mais com tbposts/storage diretamente.
 // Erro de IA aqui NÃO publica (fail-closed); detalhe interno só no log (F7).
 
-const MAX_MENSAGEM = 1000;
+const MAX_MENSAGEM = 600;
 const MAX_IMAGEM_BYTES = 5 * 1024 * 1024;
 const TIPOS_PERMITIDOS = {
   'image/png': 'png',
@@ -53,7 +53,7 @@ export async function publicar(req, res) {
     return res.status(400).json(FALHA(400, 'Mensagem é obrigatória').body);
   }
   if (mensagem.trim().length > MAX_MENSAGEM) {
-    return res.status(400).json({ ok: false, motivo: 'Mensagem excede o limite de 1000 caracteres' });
+    return res.status(400).json({ ok: false, motivo: 'Mensagem excede o limite de 600 caracteres' });
   }
 
   // 1) moderação por IA — ERRO não bloqueia: grava p/ revisão humana.
