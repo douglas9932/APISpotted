@@ -1,4 +1,5 @@
 import { validateWithAI } from '../lib/ai.js';
+import { logErro } from '../lib/logger.js';
 
 export async function validateMessage(req, res) {
   const { mensagem } = req.body;
@@ -12,15 +13,15 @@ export async function validateMessage(req, res) {
     // garantir campo necessita_validacao sempre presente
     return res.json({ necessita_validacao: false, suspeita: false, ...resultado, necessita_validacao: resultado.necessita_validacao ?? false });
   } catch (err) {
-    console.error('AI validation error:', err.message);
-    // IA indisponível (créditos, rede, 429/503) -> liberar gravação mas marcar para revisão manual
+    // F3 fail-closed: IA indisponível (créditos, rede, 429/503) NÃO libera
+    // a mensagem. Detalhe interno só no log, nunca na resposta (F7).
+    // motivo detalhado só no log do servidor (nunca na resposta — F7)
+    logErro('AI validation error', err.message);
     return res.status(503).json({
-      mensagemvalida: true,
-      motivorecusa: null,
+      mensagemvalida: false,
+      motivorecusa: 'Serviço de validação indisponível. Tente novamente em instantes.',
       suspeita: false,
-      necessita_validacao: true,
-      erro_ia: true,
-      detalhe: err.message
+      necessita_validacao: false
     });
   }
 }
