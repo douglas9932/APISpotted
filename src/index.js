@@ -4,6 +4,7 @@ import cors from 'cors';
 import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
+import { listarPendentes, liberarPost } from './routes/posts.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
@@ -40,6 +41,10 @@ app.put('/api/ias/:provedor', atualizarIa);
 app.post('/api/ias/:provedor/em-uso', definirEmUso);
 app.post('/api/ias/:provedor/chave', salvarChave);
 app.delete('/api/ias/:provedor/chave', removerChave);
+
+// Moderação de posts (tbias: permitir/recusar) — idem, somente localhost
+app.get('/api/posts-pendentes', listarPendentes);
+app.patch('/api/posts/:id/liberar', liberarPost);
 
 // Página inicial: http://localhost:PORTA mostra que a API está rodando
 app.get('/', (_req, res) => {

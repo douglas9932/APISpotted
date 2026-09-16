@@ -56,21 +56,26 @@ export async function publicar(req, res) {
     return res.status(400).json({ ok: false, motivo: 'Mensagem excede o limite de 600 caracteres' });
   }
 
-  // 1) moderação por IA — ERRO não bloqueia: grava p/ revisão humana.
+  // Com imagem, pula a IA: ela não enxerga imagem, então vai direto p/ revisão humana.
+  const temImagem = imagem !== undefined && imagem !== null;
+
+  // 1) moderação por IA (só texto puro) — ERRO não bloqueia: grava p/ revisão humana.
   // Rejeição (mensagemvalida:false) continua bloqueando.
   let ai = null;
   let iaIndisponivel = false;
-  try {
-    ai = await validateWithAI(mensagem.trim());
-  } catch (err) {
-    // motivo detalhado só no log do servidor (nunca na resposta — F7)
-    logErro('AI validation error on /api/publicar', err.message, { origem: '/api/publicar', ip });
-    iaIndisponivel = true;
+  if (!temImagem) {
+    try {
+      ai = await validateWithAI(mensagem.trim());
+    } catch (err) {
+      // motivo detalhado só no log do servidor (nunca na resposta — F7)
+      logErro('AI validation error on /api/publicar', err.message, { origem: '/api/publicar', ip });
+      iaIndisponivel = true;
+    }
   }
   if (ai && !ai.mensagemvalida) {
     return res.status(200).json({ ok: false, motivo: ai.motivorecusa || 'Sua mensagem não atende às diretrizes da comunidade.' });
   }
-  const necessitaValidacao = iaIndisponivel || ai?.suspeita === true;
+  const necessitaValidacao = temImagem || iaIndisponivel || ai?.suspeita === true;
 
   // 2) imagem opcional — validada no servidor (tipo, tamanho, assinatura)
   let imagemUrl = null;
@@ -140,7 +145,9 @@ export async function publicar(req, res) {
       pais: typeof pais === 'string' ? pais.slice(0, 120) : null,
       user_agent: typeof user_agent === 'string' ? user_agent.slice(0, 300) : null,
       criado_em: new Date().toISOString(),
-      necessita_validacao: necessitaValidacao
+      necessita_validacao: necessitaValidacao,
+      // regra (docs/tbposts_liberado.sql): validacao=false => true; true => NULL
+      liberado_para_postar: necessitaValidacao ? null : true
     });
     insErr = rIns.error;
   } catch {
@@ -152,9 +159,12 @@ export async function publicar(req, res) {
     return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar sua publicação. Tente novamente.' });
   }
 
+  const aviso = temImagem
+    ? 'Sua mensagem contém imagem e será validada pelo responsável.'
+    : (iaIndisponivel ? 'Não foi possível validar pela IA; sua mensagem será validada pelo responsável.' : null);
   return res.status(201).json({
     ok: true,
     necessita_validacao: necessitaValidacao,
-    ...(iaIndisponivel ? { aviso: 'Não foi possível validar pela IA; sua mensagem será validada pelo responsável.' } : {})
+    ...(aviso ? { aviso } : {})
   });
 }
