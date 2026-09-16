@@ -64,7 +64,7 @@ export async function publicar(req, res) {
     ai = await validateWithAI(mensagem.trim());
   } catch (err) {
     // motivo detalhado só no log do servidor (nunca na resposta — F7)
-    logErro('AI validation error on /api/publicar', err.message);
+    logErro('AI validation error on /api/publicar', err.message, { origem: '/api/publicar', ip });
     iaIndisponivel = true;
   }
   if (ai && !ai.mensagemvalida) {
@@ -100,7 +100,7 @@ export async function publicar(req, res) {
       if (e.code === 'E_NO_SUPABASE') {
         return res.status(503).json({ ok: false, motivo: 'Serviço de publicação indisponível. Tente novamente em instantes.' });
       }
-      logErro('unexpected error on /api/publicar', e.message);
+      logErro('unexpected error on /api/publicar', e.message, { origem: '/api/publicar', ip });
       return res.status(500).json({ ok: false, motivo: 'Erro inesperado. Tente novamente.' });
     }
     const nome = `${randomUUID()}.${ext}`;
@@ -108,11 +108,11 @@ export async function publicar(req, res) {
     try {
       ({ error: upErr } = await supa.storage.from('posts').upload(nome, buf, { contentType: tipo, upsert: false }));
     } catch {
-      logErro('storage upload failed on /api/publicar');
+      logErro('storage upload failed on /api/publicar', null, { origem: '/api/publicar', ip });
       return res.status(502).json({ ok: false, motivo: 'Não foi possível enviar a imagem. Tente novamente.' });
     }
     if (upErr) {
-      logErro('storage upload failed on /api/publicar');
+      logErro('storage upload failed on /api/publicar', null, { origem: '/api/publicar', ip });
       return res.status(502).json({ ok: false, motivo: 'Não foi possível enviar a imagem. Tente novamente.' });
     }
     imagemUrl = supa.storage.from('posts').getPublicUrl(nome).data.publicUrl;
@@ -144,11 +144,11 @@ export async function publicar(req, res) {
     });
     insErr = rIns.error;
   } catch {
-    logErro('tbposts insert failed on /api/publicar');
+    logErro('tbposts insert failed on /api/publicar', null, { origem: '/api/publicar', ip });
     return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar sua publicação. Tente novamente.' });
   }
   if (insErr) {
-    logErro('tbposts insert failed on /api/publicar');
+    logErro('tbposts insert failed on /api/publicar', null, { origem: '/api/publicar', ip });
     return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar sua publicação. Tente novamente.' });
   }
 

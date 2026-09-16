@@ -3,20 +3,17 @@ import express from 'express';
 import cors from 'cors';
 import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
+import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave } from './routes/ias.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// F8: falha rápido sem a chave do provedor — evita "AI validation error" por request
-const AI_PROVIDER = (process.env.AI_PROVIDER || 'claude').toLowerCase();
-const TEM_CHAVE_IA = AI_PROVIDER === 'gemini' ? !!process.env.GEMINI_API_KEY : !!process.env.ANTHROPIC_API_KEY;
-if (!TEM_CHAVE_IA) {
-  logErro(`[startup] provider "${AI_PROVIDER}" sem chave. ` +
-    (AI_PROVIDER === 'gemini'
-      ? 'Defina GEMINI_API_KEY no .env.'
-      : 'Defina ANTHROPIC_API_KEY no .env (ou use AI_PROVIDER=gemini com GEMINI_API_KEY).'));
+// F8: falha rápido sem master key de IA — seleção e chave vêm SOMENTE da
+// tabela tbias (docs/tbias.sql, modo estrito, sem fallback p/ env).
+if (!process.env.IA_MASTER_KEY) {
+  logErro('[startup] IA_MASTER_KEY ausente. Gere com node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))" e cadastre a chave criptografada em tbias.api_key_enc.');
   process.exit(1);
 }
 
@@ -34,6 +31,14 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.post('/api/validate', limiteValidate, validateMessage);
+
+// Admin das IAs (tbias) — sem token, somente localhost (ver lib/adminAuth.js)
+// (bodies já parseados pelo express.json() global acima)
+app.get('/api/ias', listarIas);
+app.put('/api/ias/:provedor', atualizarIa);
+app.post('/api/ias/:provedor/em-uso', definirEmUso);
+app.post('/api/ias/:provedor/chave', salvarChave);
+app.delete('/api/ias/:provedor/chave', removerChave);
 
 // Página inicial: http://localhost:PORTA mostra que a API está rodando
 app.get('/', (_req, res) => {
@@ -55,9 +60,10 @@ app.get('/', (_req, res) => {
 });
 
 // Rede de segurança: erro inesperado vira 500 genérico, nunca derruba o processo
+// (espelha em tblogs em best-effort, com IP/rota do request)
 // eslint-disable-next-line no-unused-vars
-app.use((err, _req, res, _next) => {
-  logErro('unexpected error', err.message);
+app.use((err, req, res, _next) => {
+  logErro('unexpected error', err.message, { origem: req.path || 'middleware', ip: req.ip || req.socket?.remoteAddress || 'unknown' });
   if (res.headersSent) return;
   return res.status(500).json({ ok: false, motivo: 'Erro inesperado. Tente novamente.' });
 });
