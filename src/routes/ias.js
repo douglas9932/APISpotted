@@ -5,7 +5,8 @@ import { logErro } from '../lib/logger.js';
 
 // Administração das IAs (tbias) — SEM token, SOMENTE localhost (ver adminAuth).
 // A chave em claro chega no body, é criptografada em memória e só o
-// ciphertext vai ao banco. Nenhum endpoint retorna chave (só tem_chave).
+// ciphertext vai ao banco. Listar não expõe chave (só tem_chave); obterChave
+// retorna descriptografada mas é bloqueada para não-localhost (exigirLocal).
 
 const PROVEDORES = ['gemini', 'openai', 'claude'];
 
@@ -173,5 +174,31 @@ export async function removerChave(req, res) {
   } catch (err) {
     logErro('ias remover chave falhou', err.message, ctx(req));
     return res.status(502).json({ ok: false, motivo: 'Não foi possível remover. Tente novamente.' });
+  }
+}
+
+export async function obterChave(req, res) {
+  if (!exigirLocal(req, res)) return;
+  const { provedor } = req.params;
+  if (!provedorOk(provedor)) {
+    return res.status(400).json({ ok: false, motivo: 'Provedor inválido.' });
+  }
+  if (!process.env.IA_MASTER_KEY) {
+    return res.status(503).json({ ok: false, motivo: 'IA_MASTER_KEY não configurada no servidor.' });
+  }
+  const supa = supaOu503(res);
+  if (!supa) return;
+  try {
+    const { data, error } = await supa.from('tbias').select('api_key_enc').eq('provedor', provedor.toLowerCase()).limit(1);
+    if (error) throw error;
+    const enc = data && data[0] && data[0].api_key_enc;
+    if (!enc) {
+      return res.status(404).json({ ok: false, motivo: 'Nenhuma chave cadastrada para este provedor.' });
+    }
+    const plain = descriptografarChave(enc);
+    return res.json({ ok: true, key: plain });
+  } catch (err) {
+    logErro('ias obter chave falhou', err.message, ctx(req));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível obter a chave. Verifique a IA_MASTER_KEY.' });
   }
 }

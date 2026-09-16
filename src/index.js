@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
-import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave } from './routes/ias.js';
+import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
@@ -35,6 +35,7 @@ app.post('/api/validate', limiteValidate, validateMessage);
 // Admin das IAs (tbias) — sem token, somente localhost (ver lib/adminAuth.js)
 // (bodies já parseados pelo express.json() global acima)
 app.get('/api/ias', listarIas);
+app.get('/api/ias/:provedor/chave', obterChave);
 app.put('/api/ias/:provedor', atualizarIa);
 app.post('/api/ias/:provedor/em-uso', definirEmUso);
 app.post('/api/ias/:provedor/chave', salvarChave);
