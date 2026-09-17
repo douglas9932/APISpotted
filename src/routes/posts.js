@@ -126,6 +126,38 @@ export async function listarLiberados(req, res) {
   }
 }
 
+export async function listarPublicados(req, res) {
+  if (!exigirLocal(req, res)) return;
+  let supa;
+  try {
+    supa = getSupabaseAdmin();
+  } catch (e) {
+    if (e.code === 'E_NO_SUPABASE') {
+      return res.status(503).json({ ok: false, motivo: 'Serviço indisponível. Tente novamente em instantes.' });
+    }
+    throw e;
+  }
+  try {
+    const q = req.query || {};
+    let query = supa
+      .from('tbposts')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, instagram_id')
+      .eq('postado', true)
+      .order('codigo', { ascending: false })
+      .limit(100);
+    if (typeof q.busca === 'string' && q.busca.trim()) {
+      const termo = q.busca.trim().slice(0, 120).replace(/[%*,()]/g, '');
+      query = query.or(`mensagem.ilike.%${termo}%,codigo.ilike.%${termo}%`);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    return res.json({ ok: true, posts: data || [] });
+  } catch (err) {
+    logErro('posts publicados falhou', err.message, ctx(req, '/api/posts-publicados'));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível carregar. Tente novamente.' });
+  }
+}
+
 export async function liberarPost(req, res) {
   if (!exigirLocal(req, res)) return;
   const { id } = req.params;
@@ -162,15 +194,48 @@ export async function liberarPost(req, res) {
   }
 }
 
-export async function marcarPostado(req, res) {
+// Atribui o próximo código (último + 1, 6 casas) se o post ainda não tiver.
+// Idempotente e seguro em corrida (update condicional + retry em 23505).
+// Retorna o código ou null se a linha não existir.
+async function atribuirCodigo(supa, id) {
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    const atual = await supa.from('tbposts').select('codigo').eq('id', id).limit(1);
+    if (atual.error) throw atual.error;
+    if (!atual.data || !atual.data.length) return null;
+    if (atual.data[0].codigo) return atual.data[0].codigo;
+    const ultimo = await supa.from('tbposts')
+      .select('codigo')
+      .not('codigo', 'is', null)
+      .order('codigo', { ascending: false })
+      .limit(1);
+    if (ultimo.error) throw ultimo.error;
+    const max = ultimo.data && ultimo.data[0] && /^\d+$/.test(ultimo.data[0].codigo || '')
+      ? parseInt(ultimo.data[0].codigo, 10)
+      : 0;
+    const proximo = String(max + 1).padStart(6, '0');
+    const rUp = await supa.from('tbposts')
+      .update({ codigo: proximo })
+      .eq('id', id)
+      .is('codigo', null)
+      .select('id');
+    if (rUp.error) {
+      if (rUp.error.code === '23505' && tentativa < 2) continue; // corrida: recalcula
+      throw rUp.error;
+    }
+    if (rUp.data && rUp.data.length) return proximo;
+    // outro escritor resolveu no meio: relê o código final
+    const rel = await supa.from('tbposts').select('codigo').eq('id', id).limit(1);
+    if (rel.error) throw rel.error;
+    return (rel.data && rel.data[0] && rel.data[0].codigo) || null;
+  }
+  return null;
+}
+
+export async function reservarCodigo(req, res) {
   if (!exigirLocal(req, res)) return;
   const { id } = req.params;
   if (typeof id !== 'string' || !UUID.test(id)) {
     return res.status(400).json({ ok: false, motivo: 'ID inválido.' });
-  }
-  const { postado } = req.body || {};
-  if (typeof postado !== 'boolean') {
-    return res.status(400).json({ ok: false, motivo: 'Informe postado: true|false.' });
   }
   let supa;
   try {
@@ -182,6 +247,58 @@ export async function marcarPostado(req, res) {
     throw e;
   }
   try {
+    const codigo = await atribuirCodigo(supa, id);
+    if (!codigo) {
+      return res.status(404).json({ ok: false, motivo: 'Post não encontrado.' });
+    }
+    return res.json({ ok: true, codigo });
+  } catch (err) {
+    logErro('posts reservar falhou', err.message, ctx(req, '/api/posts/:id/reservar-codigo'));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível reservar. Tente novamente.' });
+  }
+}
+
+export async function marcarPostado(req, res) {
+  if (!exigirLocal(req, res)) return;
+  const { id } = req.params;
+  if (typeof id !== 'string' || !UUID.test(id)) {
+    return res.status(400).json({ ok: false, motivo: 'ID inválido.' });
+  }
+  const { postado, instagram_id } = req.body || {};
+  if (typeof postado !== 'boolean') {
+    return res.status(400).json({ ok: false, motivo: 'Informe postado: true|false.' });
+  }
+  // instagram_id opcional (ID da mídia na Graph API); só texto curto
+  if (instagram_id !== undefined && instagram_id !== null &&
+      (typeof instagram_id !== 'string' || !instagram_id.trim() || instagram_id.length > 120)) {
+    return res.status(400).json({ ok: false, motivo: 'instagram_id inválido.' });
+  }
+  let supa;
+  try {
+    supa = getSupabaseAdmin();
+  } catch (e) {
+    if (e.code === 'E_NO_SUPABASE') {
+      return res.status(503).json({ ok: false, motivo: 'Serviço indisponível. Tente novamente em instantes.' });
+    }
+    throw e;
+  }
+  try {
+    // Ao publicar (postado=true): garante o código (reserva antecipada ou aqui)
+    // e grava postado (+ instagram_id opcional).
+    let codigo = null;
+    if (postado) {
+      codigo = await atribuirCodigo(supa, id);
+      const patchPub = { postado: true };
+      if (typeof instagram_id === 'string' && instagram_id.trim()) {
+        patchPub.instagram_id = instagram_id.trim();
+      }
+      const { data, error } = await supa.from('tbposts').update(patchPub).eq('id', id).select('id');
+      if (error) throw error;
+      if (!data || !data.length) {
+        return res.status(404).json({ ok: false, motivo: 'Post não encontrado.' });
+      }
+      return res.json({ ok: true, codigo });
+    }
     const { data, error } = await supa
       .from('tbposts')
       .update({ postado })
