@@ -40,6 +40,65 @@ export async function listarPendentes(req, res) {
   }
 }
 
+export async function listarRejeitados(req, res) {
+  if (!exigirLocal(req, res)) return;
+  let supa;
+  try {
+    supa = getSupabaseAdmin();
+  } catch (e) {
+    if (e.code === 'E_NO_SUPABASE') {
+      return res.status(503).json({ ok: false, motivo: 'Serviço indisponível. Tente novamente em instantes.' });
+    }
+    throw e;
+  }
+  try {
+    const [rPosts, rRejeitados] = await Promise.all([
+      supa
+        .from('tbposts')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+        .eq('liberado_para_postar', false)
+        .order('criado_em', { ascending: false })
+        .limit(100),
+      supa
+        .from('tbposts_rejeitados')
+        .select('id, mensagem, imagem_url, criado_em, motivo_recusa')
+        .order('criado_em', { ascending: false })
+        .limit(100)
+    ]);
+    if (rPosts.error) throw rPosts.error;
+    if (rRejeitados.error) throw rRejeitados.error;
+
+    const posts = (rPosts.data || []).map((p) => ({
+      ...p,
+      id: String(p.id),
+      origem: 'tbposts',
+      motivo_recusa: null
+    }));
+    const rejeitados = (rRejeitados.data || []).map((p) => ({
+      ...p,
+      id: String(p.id),
+      origem: 'tbposts_rejeitados',
+      ip: null,
+      cidade: null,
+      estado: null,
+      pais: null,
+      user_agent: null,
+      codigo: null
+    }));
+
+    const todos = [...posts, ...rejeitados].sort((a, b) => {
+      const da = a.criado_em ? new Date(a.criado_em).getTime() : 0;
+      const db = b.criado_em ? new Date(b.criado_em).getTime() : 0;
+      return db - da;
+    }).slice(0, 100);
+
+    return res.json({ ok: true, posts: todos });
+  } catch (err) {
+    logErro('posts rejeitados falhou', err.message, ctx(req, '/api/posts-rejeitados'));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível carregar. Tente novamente.' });
+  }
+}
+
 export async function liberarPost(req, res) {
   if (!exigirLocal(req, res)) return;
   const { id } = req.params;
