@@ -9,7 +9,8 @@ import { logErro } from '../lib/logger.js';
 
 const MAX_MENSAGEM = 600;
 const MAX_IMAGEM_BYTES = 5 * 1024 * 1024;
-const TIPOS_PERMITIDOS = {
+export { MAX_IMAGEM_BYTES };
+export const TIPOS_PERMITIDOS = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
   'image/gif': 'gif'
@@ -29,7 +30,7 @@ function RATE_EXCEDIDO(ip) {
   return false;
 }
 
-function ASSINATURA_OK(buf, tipo) {
+export function ASSINATURA_OK(buf, tipo) {
   if (tipo === 'image/png') return buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
   if (tipo === 'image/jpeg') return buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
   if (tipo === 'image/gif') return buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x38;

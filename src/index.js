@@ -5,6 +5,7 @@ import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
 import { listarPendentes, listarRejeitados, liberarPost } from './routes/posts.js';
+import { obterConfig, salvarConfig, obterTokenConfig } from './routes/config.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
@@ -25,6 +26,9 @@ app.use(cors());
 // F1: publicação via servidor (service-role) com corpo maior só nesta rota;
 // o limite global restrito (F4) continua valendo para as demais
 app.post('/api/publicar', express.json({ limit: '8mb' }), publicar);
+// PUT config com corpo maior (base64 da imagem chega a MBs) ANTES do json global;
+// registrado depois, o global de 100kb rejeitaria antes (F4)
+app.put('/api/configuracoes', express.json({ limit: '8mb' }), salvarConfig);
 app.use(express.json());
 
 app.get('/api/health', (_req, res) => {
@@ -46,6 +50,10 @@ app.delete('/api/ias/:provedor/chave', removerChave);
 app.get('/api/posts-pendentes', listarPendentes);
 app.get('/api/posts-rejeitados', listarRejeitados);
 app.patch('/api/posts/:id/liberar', liberarPost);
+
+// Configuração global (tbconfiguracoes, 1 linha) — idem, somente localhost
+app.get('/api/configuracoes', obterConfig);
+app.get('/api/configuracoes/token', obterTokenConfig);
 
 // Página inicial: http://localhost:PORTA mostra que a API está rodando
 app.get('/', (_req, res) => {
