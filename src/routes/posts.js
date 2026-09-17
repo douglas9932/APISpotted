@@ -99,6 +99,33 @@ export async function listarRejeitados(req, res) {
   }
 }
 
+export async function listarLiberados(req, res) {
+  if (!exigirLocal(req, res)) return;
+  let supa;
+  try {
+    supa = getSupabaseAdmin();
+  } catch (e) {
+    if (e.code === 'E_NO_SUPABASE') {
+      return res.status(503).json({ ok: false, motivo: 'Serviço indisponível. Tente novamente em instantes.' });
+    }
+    throw e;
+  }
+  try {
+    const { data, error } = await supa
+      .from('tbposts')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+      .eq('liberado_para_postar', true)
+      .eq('postado', false)
+      .order('criado_em', { ascending: false })
+      .limit(100);
+    if (error) throw error;
+    return res.json({ ok: true, posts: data || [] });
+  } catch (err) {
+    logErro('posts liberados falhou', err.message, ctx(req, '/api/posts-liberados'));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível carregar. Tente novamente.' });
+  }
+}
+
 export async function liberarPost(req, res) {
   if (!exigirLocal(req, res)) return;
   const { id } = req.params;
@@ -131,6 +158,42 @@ export async function liberarPost(req, res) {
     return res.json({ ok: true });
   } catch (err) {
     logErro('posts liberar falhou', err.message, ctx(req, '/api/posts/:id/liberar'));
+    return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar. Tente novamente.' });
+  }
+}
+
+export async function marcarPostado(req, res) {
+  if (!exigirLocal(req, res)) return;
+  const { id } = req.params;
+  if (typeof id !== 'string' || !UUID.test(id)) {
+    return res.status(400).json({ ok: false, motivo: 'ID inválido.' });
+  }
+  const { postado } = req.body || {};
+  if (typeof postado !== 'boolean') {
+    return res.status(400).json({ ok: false, motivo: 'Informe postado: true|false.' });
+  }
+  let supa;
+  try {
+    supa = getSupabaseAdmin();
+  } catch (e) {
+    if (e.code === 'E_NO_SUPABASE') {
+      return res.status(503).json({ ok: false, motivo: 'Serviço indisponível. Tente novamente em instantes.' });
+    }
+    throw e;
+  }
+  try {
+    const { data, error } = await supa
+      .from('tbposts')
+      .update({ postado })
+      .eq('id', id)
+      .select('id');
+    if (error) throw error;
+    if (!data || !data.length) {
+      return res.status(404).json({ ok: false, motivo: 'Post não encontrado.' });
+    }
+    return res.json({ ok: true });
+  } catch (err) {
+    logErro('posts postado falhou', err.message, ctx(req, '/api/posts/:id/postado'));
     return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar. Tente novamente.' });
   }
 }

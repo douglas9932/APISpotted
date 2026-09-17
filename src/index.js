@@ -4,8 +4,9 @@ import cors from 'cors';
 import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
-import { listarPendentes, listarRejeitados, liberarPost } from './routes/posts.js';
+import { listarPendentes, listarRejeitados, listarLiberados, liberarPost, marcarPostado } from './routes/posts.js';
 import { obterConfig, salvarConfig, obterTokenConfig } from './routes/config.js';
+import { listarLogs, registrarLog } from './routes/logs.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
@@ -49,7 +50,13 @@ app.delete('/api/ias/:provedor/chave', removerChave);
 // Moderação de posts (tbias: permitir/recusar) — idem, somente localhost
 app.get('/api/posts-pendentes', listarPendentes);
 app.get('/api/posts-rejeitados', listarRejeitados);
+app.get('/api/posts-liberados', listarLiberados);
 app.patch('/api/posts/:id/liberar', liberarPost);
+app.patch('/api/posts/:id/postado', marcarPostado);
+
+// Leitura de logs (tblogs) — idem, somente localhost
+app.get('/api/logs', listarLogs);
+app.post('/api/logs', registrarLog);
 
 // Configuração global (tbconfiguracoes, 1 linha) — idem, somente localhost
 app.get('/api/configuracoes', obterConfig);
