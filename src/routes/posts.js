@@ -24,16 +24,27 @@ export async function listarPendentes(req, res) {
     throw e;
   }
   try {
-    const { data, error } = await supa
+    let resp = await supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido, necessita_validacao, motivo_validacao')
       .eq('necessita_validacao', true)
       .is('liberado_para_postar', null)
       .eq('postado', false)
       .order('criado_em', { ascending: false })
       .limit(100);
-    if (error) throw error;
-    return res.json({ ok: true, posts: data || [] });
+    // Compat: banco ainda sem motivo_validacao/excluido (migration pendente) — retry sem as colunas novas
+    if (resp.error && resp.error.code === '42703') {
+      resp = await supa
+        .from('tbposts')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+        .eq('necessita_validacao', true)
+        .is('liberado_para_postar', null)
+        .eq('postado', false)
+        .order('criado_em', { ascending: false })
+        .limit(100);
+    }
+    if (resp.error) throw resp.error;
+    return res.json({ ok: true, posts: resp.data || [] });
   } catch (err) {
     logErro('posts pendentes falhou', err.message, ctx(req, '/api/posts-pendentes'));
     return res.status(502).json({ ok: false, motivo: 'Não foi possível carregar. Tente novamente.' });
@@ -113,12 +124,12 @@ export async function listarLiberados(req, res) {
   try {
     let resp = await supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido, necessita_validacao, motivo_validacao')
       .eq('liberado_para_postar', true)
       .eq('postado', false)
       .order('criado_em', { ascending: false })
       .limit(100);
-    if (resp.error && resp.error.code === '42703' && String(resp.error.message).includes('excluido')) {
+    if (resp.error && resp.error.code === '42703') {
       resp = await supa
         .from('tbposts')
         .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
@@ -150,7 +161,7 @@ export async function listarPublicados(req, res) {
     const q = req.query || {};
     let query = supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, instagram_id, excluido')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, instagram_id, excluido, necessita_validacao, motivo_validacao')
       .eq('postado', true)
       .order('codigo', { ascending: false })
       .limit(100);

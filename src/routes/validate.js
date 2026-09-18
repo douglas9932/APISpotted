@@ -5,13 +5,20 @@ export async function validateMessage(req, res) {
   const { mensagem } = req.body;
 
   if (!mensagem || !mensagem.trim()) {
-    return res.status(400).json({ mensagemvalida: false, motivorecusa: 'Mensagem é obrigatória', suspeita: false, necessita_validacao: false });
+    return res.status(400).json({ mensagemvalida: false, motivorecusa: 'Mensagem é obrigatória', suspeita: false, motivo_suspeita: null, necessita_validacao: false, motivo_validacao: null });
   }
 
   try {
     const resultado = await validateWithAI(mensagem.trim());
-    // garantir campo necessita_validacao sempre presente
-    return res.json({ necessita_validacao: false, suspeita: false, ...resultado, necessita_validacao: resultado.necessita_validacao ?? false });
+    // garantir campos necessita_validacao/motivo_validacao sempre presentes;
+    // suspeita=true => vai para revisão humana com motivo obrigatório
+    const necessita = resultado.suspeita === true;
+    return res.json({
+      necessita_validacao: false, suspeita: false, motivo_suspeita: null, motivo_validacao: null,
+      ...resultado,
+      necessita_validacao: necessita,
+      motivo_validacao: necessita ? (resultado.motivo_suspeita || 'Sinalizado como suspeito pela IA — revisão humana.') : null
+    });
   } catch (err) {
     // F3 fail-closed: IA indisponível (créditos, rede, 429/503) NÃO libera
     // a mensagem. Detalhe interno só no log, nunca na resposta (F7).
@@ -23,7 +30,9 @@ export async function validateMessage(req, res) {
       mensagemvalida: false,
       motivorecusa: 'Serviço de validação indisponível. Tente novamente em instantes.',
       suspeita: false,
-      necessita_validacao: false
+      motivo_suspeita: null,
+      necessita_validacao: false,
+      motivo_validacao: null
     });
   }
 }

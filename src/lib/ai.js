@@ -13,7 +13,14 @@ import { obterChaveProvedor } from './crypto.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const prompts = JSON.parse(readFileSync(join(__dirname, '../../prompts.json'), 'utf-8'));
 
-const TIMEOUT_MS = 20_000;
+// Timeout da IA: configurável via AI_TIMEOUT_MS (padrão 45s, mín 5s, máx 120s).
+// Aumente se a IA estiver lenta (ex: AI_TIMEOUT_MS=60000 no .env).
+// Vale para Gemini (corrida) e Claude/OpenAI (AbortSignal).
+const TIMEOUT_MS = (() => {
+  const v = Number.parseInt(process.env.AI_TIMEOUT_MS || '45000', 10);
+  if (!Number.isFinite(v)) return 45000;
+  return Math.min(120000, Math.max(5000, v));
+})();
 
 function buildPrompt(message) {
   return `${prompts.validacao}${message}${prompts.sufixo}`;
@@ -47,7 +54,9 @@ async function callClaude(message, { key, modelo, maxTokens }) {
   if (!response.ok) {
     const err = await response.text();
     console.error('Anthropic error:', response.status, err);
-    throw new Error(`Anthropic ${response.status}`);
+    // Inclui o corpo (truncado) na exceção: cai só no log do servidor/tblogs,
+    // nunca na resposta ao usuário (F7). Essencial p/ diagnosticar 400/401.
+    throw new Error(`Anthropic ${response.status}: ${String(err).slice(0, 300)}`);
   }
 
   const data = await response.json();
@@ -81,7 +90,8 @@ async function callOpenAI(message, { key, modelo, maxTokens }) {
   if (!response.ok) {
     const err = await response.text();
     console.error('OpenAI error:', response.status, err);
-    throw new Error(`OpenAI ${response.status}`);
+    // Corpo truncado só no log do servidor/tblogs, nunca ao usuário (F7).
+    throw new Error(`OpenAI ${response.status}: ${String(err).slice(0, 300)}`);
   }
 
   const data = await response.json();
@@ -137,13 +147,22 @@ function parseAIResponse(text) {
   try {
     resultado = JSON.parse(text);
     if (typeof resultado.mensagemvalida !== 'boolean') {
-      resultado = { mensagemvalida: false, motivorecusa: 'Erro na validação', suspeita: false };
+      resultado = { mensagemvalida: false, motivorecusa: 'Erro na validação', suspeita: false, motivo_suspeita: null };
     }
     if (typeof resultado.suspeita !== 'boolean') {
       resultado.suspeita = false;
     }
+    // motivo_suspeita: obrigatório quando suspeita=true (novo campo motivo_validacao em tbposts)
+    if (typeof resultado.motivo_suspeita === 'string') {
+      resultado.motivo_suspeita = resultado.motivo_suspeita.trim().slice(0, 500) || null;
+    } else {
+      resultado.motivo_suspeita = null;
+    }
+    if (resultado.suspeita !== true) {
+      resultado.motivo_suspeita = null;
+    }
   } catch {
-    resultado = { mensagemvalida: false, motivorecusa: 'Erro ao processar resposta', suspeita: false };
+    resultado = { mensagemvalida: false, motivorecusa: 'Erro ao processar resposta', suspeita: false, motivo_suspeita: null };
   }
   return resultado;
 }

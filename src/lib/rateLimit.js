@@ -15,7 +15,9 @@ export function criarRateLimit({ janelaMs, max }) {
         mensagemvalida: false,
         motivorecusa: 'Muitas tentativas. Aguarde um minuto e tente novamente.',
         suspeita: false,
-        necessita_validacao: false
+        motivo_suspeita: null,
+        necessita_validacao: false,
+        motivo_validacao: null
       });
     }
     next();

@@ -41,6 +41,52 @@ function FALHA(status, motivo) {
   return { status, body: { ok: false, motivo } };
 }
 
+// Resumo técnico do erro para o moderador (até 220 chars, uma linha).
+// Seguro: motivo_validacao é lido só pela moderação (não volta ao usuário — F7).
+// Higieniza possíveis segredos e o log completo continua no tblogs.
+function RESUMO_ERRO_IA(iaErro) {
+  let t = String(iaErro?.message || iaErro || '').replace(/\s+/g, ' ').trim();
+  if (!t) return null;
+  t = t.replace(/sk-[A-Za-z0-9-_]{10,}/g, '[chave-oculta]').replace(/Bearer\s+\S+/gi, 'Bearer [oculto]');
+  return t.slice(0, 220) || null;
+}
+
+// Classifica o erro da IA em causa curta e amigável para o moderador.
+// O detalhe bruto completo fica SÓ no log/tblogs (F7).
+function CAUSA_IA(iaErro) {
+  const t = String(iaErro?.message || iaErro || '');
+  const ms = /(\d+)\s*ms/i.exec(t);
+  const dur = ms ? ` (${Math.round(Number(ms[1]) / 1000)}s)` : '';
+  if (/timeout após|timed out|timeouterror|abort/i.test(t)) return `Tempo esgotado na IA${dur}`;
+  if (/credit|billing|balance|insufficient/i.test(t)) return 'Créditos da IA esgotados';
+  if (/\b401\b|unauthorized|authentication/i.test(t)) return 'Falha de autenticação na IA';
+  if (/\b429\b|rate.?limit|quota|resource.?exhausted/i.test(t)) return 'Limite da IA excedido';
+  if (/high demand|overloaded|overload|try again later|capacity|temporar/i.test(t)) return 'IA sobrecarregada (demanda alta, temporário)';
+  if (/\b402\b|payment/i.test(t)) return 'Pagamento da IA pendente';
+  if (/\b400\b|invalid|not.?found/i.test(t)) return 'Configuração da IA inválida (modelo/parâmetros)';
+  if (/\b5\d\d\b|fetch failed|network|econn|enotfound|etimedout|eai_again|socket hang/i.test(t)) return 'Erro temporário/falha de comunicação com a IA';
+  if (/tbias inacessível|nenhuma ia em uso/i.test(t)) return 'IA não configurada';
+  return 'Falha na IA';
+}
+
+// motivo_validacao (tbposts.motivo_validacao): OBRIGATÓRIO sempre que
+// necessita_validacao=true (CHECK chk_tbposts_motivo_validacao).
+// Origens: imagem | IA indisponível (causa classificada) | suspeita da IA (com motivo_suspeita).
+function MOTIVO_VALIDACAO({ temImagem, iaIndisponivel, ai, iaErro }) {
+  const motivos = [];
+  if (temImagem) motivos.push('Contém imagem — revisão humana obrigatória (IA não analisa imagem).');
+  if (iaIndisponivel) {
+    const resumo = RESUMO_ERRO_IA(iaErro);
+    motivos.push(`${CAUSA_IA(iaErro)} — revisão humana.${resumo ? ` Detalhe: ${resumo}` : ''}`);
+  }
+  if (ai?.suspeita === true) {
+    const m = typeof ai?.motivo_suspeita === 'string' ? ai.motivo_suspeita.trim().slice(0, 500) : '';
+    motivos.push(m || 'Sinalizado como suspeito pela IA — revisão humana.');
+  }
+  if (!motivos.length) return null;
+  return motivos.join(' | ').slice(0, 500);
+}
+
 export async function publicar(req, res) {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
 
@@ -64,6 +110,7 @@ export async function publicar(req, res) {
   // Rejeição (mensagemvalida:false) continua bloqueando.
   let ai = null;
   let iaIndisponivel = false;
+  let iaErro = null;
   if (!temImagem) {
     try {
       ai = await validateWithAI(mensagem.trim());
@@ -71,12 +118,33 @@ export async function publicar(req, res) {
       // motivo detalhado só no log do servidor (nunca na resposta — F7)
       logErro('AI validation error on /api/publicar', err.message, { origem: '/api/publicar', ip });
       iaIndisponivel = true;
+      iaErro = err;
     }
   }
   if (ai && !ai.mensagemvalida) {
-    return res.status(200).json({ ok: false, motivo: ai.motivorecusa || 'Sua mensagem não atende às diretrizes da comunidade.' });
+    const motivoRecusa = ai.motivorecusa || 'Sua mensagem não atende às diretrizes da comunidade.';
+    // Auditoria best-effort: registra a recusa da IA em tbposts_rejeitados
+    // (mensagem + motivo_recusa). Falha aqui nunca muda a resposta —
+    // a mensagem segue recusada; só loga.
+    try {
+      const supaAud = getSupabaseAdmin();
+      const { error: audErr } = await supaAud.from('tbposts_rejeitados').insert({
+        mensagem: mensagem.trim(),
+        imagem_url: null,
+        motivo_recusa: String(motivoRecusa).slice(0, 500),
+        criado_em: new Date().toISOString()
+      });
+      if (audErr) logErro('tbposts_rejeitados insert falhou (recusa IA)', audErr.message, { origem: '/api/publicar', ip });
+    } catch (e) {
+      logErro('tbposts_rejeitados insert falhou (recusa IA)', e.message, { origem: '/api/publicar', ip });
+    }
+    return res.status(200).json({ ok: false, motivo: motivoRecusa });
   }
   const necessitaValidacao = temImagem || iaIndisponivel || ai?.suspeita === true;
+  // Fail-safe: nunca gravar necessita=true sem motivo (violação do CHECK derrubaria o insert)
+  let motivoValidacao = MOTIVO_VALIDACAO({ temImagem, iaIndisponivel, ai, iaErro });
+  if (necessitaValidacao && !motivoValidacao) motivoValidacao = 'Encaminhado para revisão humana.';
+  if (!necessitaValidacao) motivoValidacao = null;
 
   // 2) imagem opcional — validada no servidor (tipo, tamanho, assinatura)
   let imagemUrl = null;
@@ -147,6 +215,7 @@ export async function publicar(req, res) {
       user_agent: typeof user_agent === 'string' ? user_agent.slice(0, 300) : null,
       criado_em: new Date().toISOString(),
       necessita_validacao: necessitaValidacao,
+      motivo_validacao: motivoValidacao,
       // regra (docs/tbposts_liberado.sql): validacao=false => true; true => NULL
       liberado_para_postar: necessitaValidacao ? null : true
     });
@@ -163,6 +232,7 @@ export async function publicar(req, res) {
   const aviso = temImagem
     ? 'Sua mensagem contém imagem e será validada pelo responsável.'
     : (iaIndisponivel ? 'Não foi possível validar pela IA; sua mensagem será validada pelo responsável.' : null);
+  // F7: motivo_validacao NÃO volta ao usuário (detalhe interno é só log/moderador).
   return res.status(201).json({
     ok: true,
     necessita_validacao: necessitaValidacao,
