@@ -116,13 +116,12 @@ export async function listarLiberados(req, res) {
       .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
       .eq('liberado_para_postar', true)
       .eq('postado', false)
-      .or('excluido.is.null,excluido.eq.false')
       .order('criado_em', { ascending: false })
       .limit(100);
     if (resp.error && resp.error.code === '42703' && String(resp.error.message).includes('excluido')) {
       resp = await supa
         .from('tbposts')
-        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
         .eq('liberado_para_postar', true)
         .eq('postado', false)
         .order('criado_em', { ascending: false })
