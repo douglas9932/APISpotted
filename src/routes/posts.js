@@ -1,4 +1,4 @@
-import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
+﻿import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
 import { exigirLocal } from '../lib/adminAuth.js';
 import { logErro } from '../lib/logger.js';
 
@@ -26,7 +26,7 @@ export async function listarPendentes(req, res) {
   try {
     const { data, error } = await supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
       .eq('necessita_validacao', true)
       .is('liberado_para_postar', null)
       .eq('postado', false)
@@ -55,7 +55,7 @@ export async function listarRejeitados(req, res) {
     const [rPosts, rRejeitados] = await Promise.all([
       supa
         .from('tbposts')
-        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
         .eq('liberado_para_postar', false)
         .order('criado_em', { ascending: false })
         .limit(100),
@@ -113,7 +113,7 @@ export async function listarLiberados(req, res) {
   try {
     let resp = await supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
       .eq('liberado_para_postar', true)
       .eq('postado', false)
       .or('excluido.is.null,excluido.eq.false')
@@ -122,7 +122,7 @@ export async function listarLiberados(req, res) {
     if (resp.error && resp.error.code === '42703' && String(resp.error.message).includes('excluido')) {
       resp = await supa
         .from('tbposts')
-        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, excluido')
         .eq('liberado_para_postar', true)
         .eq('postado', false)
         .order('criado_em', { ascending: false })
@@ -151,7 +151,7 @@ export async function listarPublicados(req, res) {
     const q = req.query || {};
     let query = supa
       .from('tbposts')
-      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, instagram_id')
+      .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo, instagram_id, excluido')
       .eq('postado', true)
       .order('codigo', { ascending: false })
       .limit(100);
