@@ -111,15 +111,25 @@ export async function listarLiberados(req, res) {
     throw e;
   }
   try {
-    const { data, error } = await supa
+    let resp = await supa
       .from('tbposts')
       .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
       .eq('liberado_para_postar', true)
       .eq('postado', false)
+      .or('excluido.is.null,excluido.eq.false')
       .order('criado_em', { ascending: false })
       .limit(100);
-    if (error) throw error;
-    return res.json({ ok: true, posts: data || [] });
+    if (resp.error && resp.error.code === '42703' && String(resp.error.message).includes('excluido')) {
+      resp = await supa
+        .from('tbposts')
+        .select('id, mensagem, imagem_url, ip, cidade, estado, pais, user_agent, criado_em, codigo')
+        .eq('liberado_para_postar', true)
+        .eq('postado', false)
+        .order('criado_em', { ascending: false })
+        .limit(100);
+    }
+    if (resp.error) throw resp.error;
+    return res.json({ ok: true, posts: resp.data || [] });
   } catch (err) {
     logErro('posts liberados falhou', err.message, ctx(req, '/api/posts-liberados'));
     return res.status(502).json({ ok: false, motivo: 'Não foi possível carregar. Tente novamente.' });
@@ -299,9 +309,26 @@ export async function marcarPostado(req, res) {
       }
       return res.json({ ok: true, codigo });
     }
+    // Ao despublicar/excluir (postado=false): limpa instagram_id e impede reenvio
+    const patchOff = { postado: false, instagram_id: null, liberado_para_postar: false };
+    let excluidoOk = false;
+    try {
+      const test = await supa.from('tbposts').update({ ...patchOff, excluido: true }).eq('id', id).select('id');
+      if (!test.error) {
+        excluidoOk = true;
+        if (!test.data || !test.data.length) {
+          return res.status(404).json({ ok: false, motivo: 'Post não encontrado.' });
+        }
+        return res.json({ ok: true });
+      }
+      if (test.error && test.error.code !== '42703' && !String(test.error.message).includes('excluido')) throw test.error;
+    } catch (e) {
+      if (e.code !== '42703' && !String(e.message || '').includes('excluido')) throw e;
+    }
+    if (excluidoOk) return res.json({ ok: true });
     const { data, error } = await supa
       .from('tbposts')
-      .update({ postado })
+      .update(patchOff)
       .eq('id', id)
       .select('id');
     if (error) throw error;
