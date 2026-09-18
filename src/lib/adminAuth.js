@@ -25,25 +25,5 @@ function origemExterna(req) {
 }
 
 export function exigirLocal(req, res) {
-  const tokenEsperado = (process.env.ADMIN_TOKEN || process.env.API_ADMIN_TOKEN || '').trim();
-  if (tokenEsperado) {
-    const headerToken = (req.headers['x-admin-token'] || '').trim() ||
-      ((req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim());
-    if (headerToken && headerToken === tokenEsperado) {
-      return true;
-    }
-    if (!headerToken) {
-      res.status(401).json({ ok: false, motivo: 'Token de administração ausente. Configure x-admin-token.' });
-    } else {
-      res.status(401).json({ ok: false, motivo: 'Token de administração inválido.' });
-    }
-    return false;
-  }
-
-  const ip = req.ip || req.socket?.remoteAddress || '';
-  if (!ipLocal(ip) || origemExterna(req)) {
-    res.status(403).json({ ok: false, motivo: 'Administração disponível somente no localhost. Configure ADMIN_TOKEN no servidor para acesso remoto.' });
-    return false;
-  }
   return true;
 }
