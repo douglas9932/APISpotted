@@ -122,13 +122,10 @@ export async function validateWithAI(message) {
   if (!cfg) {
     throw new Error('Nenhuma IA em uso (tbias sem linha em_uso=true ativa com chave válida)');
   }
-  // Prova de descriptografia: loga apenas prefixo/sufixo da chave descriptografada (nunca a chave completa)
-  try {
-    const k = cfg.key || '';
-    const prefix = k.slice(0, 8);
-    const suffix = k.slice(-4);
-    console.log(`[ai] provedor=${cfg.provedor} modelo=${cfg.modelo} key len=${k.length} prefix=${prefix}...suffix=${suffix} decrypted_ok=${k.length>0}`);
-  } catch {}
+  // Log apenas provedor/modelo (sem dados sensíveis da chave)
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[ai] provedor=${cfg.provedor} modelo=${cfg.modelo}`);
+  }
   // UMA única tentativa, na IA em uso. Falha aqui vira 503 (/validate) ou
   // revisão manual (/publicar) — nunca tenta outro provedor sozinha.
   const text = await CALLERS[cfg.provedor](message, cfg);

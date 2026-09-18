@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import { validateMessage } from './routes/validate.js';
 import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
@@ -12,6 +13,7 @@ import { logErro, logInfo } from './lib/logger.js';
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+app.set('trust proxy', 1);
 
 // F8: falha rápido sem master key de IA — seleção e chave vêm SOMENTE da
 // tabela tbias (docs/tbias.sql, modo estrito, sem fallback p/ env).
@@ -23,6 +25,7 @@ if (!process.env.IA_MASTER_KEY) {
 // F2: 30 validações/minuto por IP (protege a quota da IA)
 const limiteValidate = criarRateLimit({ janelaMs: 60_000, max: 30 });
 
+app.use(helmet());
 app.use(cors());
 // F1: publicação via servidor (service-role) com corpo maior só nesta rota;
 // o limite global restrito (F4) continua valendo para as demais
@@ -30,7 +33,7 @@ app.post('/api/publicar', express.json({ limit: '8mb' }), publicar);
 // PUT config com corpo maior (base64 da imagem chega a MBs) ANTES do json global;
 // registrado depois, o global de 100kb rejeitaria antes (F4)
 app.put('/api/configuracoes', express.json({ limit: '8mb' }), salvarConfig);
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ online: true });
