@@ -75,13 +75,7 @@ app.get('/', (_req, res) => {
 <title>Spotted API — rodando</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 640px; margin: 4rem auto; padding: 0 1rem;">
   <h1>✅ API Spotted rodando</h1>
-  <p>Servidor no ar em <strong>porta ${PORT}</strong> — ${new Date().toLocaleString('pt-BR')}.</p>
-  <h2>Endpoints</h2>
-  <ul>
-    <li><code>GET /api/health</code> — status</li>
-    <li><code>POST /api/validate</code> — moderação de mensagem { mensagem }</li>
-    <li><code>POST /api/publicar</code> — publicação (valida + grava)</li>
-  </ul>
+  <p>Servidor no ar — ${new Date().toLocaleString('pt-BR')}.</p>
 </body>
 </html>`);
 });
