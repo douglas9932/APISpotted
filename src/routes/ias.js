@@ -8,7 +8,7 @@ import { logErro } from '../lib/logger.js';
 // ciphertext vai ao banco. Listar não expõe chave (só tem_chave); obterChave
 // retorna descriptografada mas é bloqueada para não-localhost (exigirLocal).
 
-const PROVEDORES = ['gemini', 'openai', 'claude'];
+const PROVEDORES = ['gemini', 'openai', 'claude', 'groq'];
 
 function provedorOk(v) {
   return typeof v === 'string' && PROVEDORES.includes(v.toLowerCase());

@@ -98,7 +98,34 @@ async function callOpenAI(message, { key, modelo, maxTokens }) {
   return data.choices[0].message.content;
 }
 
-const CALLERS = { claude: callClaude, gemini: callGemini, openai: callOpenAI };
+async function callGroq(message, { key, modelo, maxTokens }) {
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${key}`
+    },
+    body: JSON.stringify({
+      model: modelo,
+      max_tokens: maxTokens,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'user', content: buildPrompt(message) }]
+    }),
+    signal: AbortSignal.timeout(TIMEOUT_MS)
+  });
+
+  if (!response.ok) {
+    const err = await response.text();
+    console.error('Groq error:', response.status, err);
+    // Corpo truncado só no log do servidor/tblogs, nunca ao usuário (F7).
+    throw new Error(`Groq ${response.status}: ${String(err).slice(0, 300)}`);
+  }
+
+  const data = await response.json();
+  return data.choices[0].message.content;
+}
+
+const CALLERS = { claude: callClaude, gemini: callGemini, groq: callGroq, openai: callOpenAI };
 
 // Fonte primária: a ÚNICA linha com em_uso=true (+ ativa e com chave na env).
 function configViaTabela() {
