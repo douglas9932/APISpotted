@@ -7,6 +7,7 @@ import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
 import { listarPendentes, listarRejeitados, listarLiberados, liberarPost, marcarPostado, listarPublicados, reservarCodigo } from './routes/posts.js';
 import { obterConfig, salvarConfig, obterTokenConfig } from './routes/config.js';
+import { uploadStaging, excluirStaging } from './routes/staging.js';
 import { listarLogs, registrarLog } from './routes/logs.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
@@ -33,10 +34,18 @@ app.post('/api/publicar', express.json({ limit: '8mb' }), publicar);
 // PUT config com corpo maior (base64 da imagem chega a MBs) ANTES do json global;
 // registrado depois, o global de 100kb rejeitaria antes (F4)
 app.put('/api/configuracoes', express.json({ limit: '8mb' }), salvarConfig);
+// Upload temporário p/ publicação via painel web (JPEG montado em base64) —
+// mesmo motivo: corpo maior que o limite global
+app.post('/api/upload-imagem', express.json({ limit: '8mb' }), uploadStaging);
 app.use(express.json({ limit: '100kb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ online: true });
+});
+
+// Marcador de versão (confirma qual código está no ar)
+app.get('/api/versao', (_req, res) => {
+  res.json({ versao: '2026-09-25-upload-imagem' });
 });
 
 app.post('/api/validate', limiteValidate, validateMessage);
@@ -66,6 +75,9 @@ app.post('/api/logs', registrarLog);
 // Configuração global (tbconfiguracoes, 1 linha) — idem, somente localhost
 app.get('/api/configuracoes', obterConfig);
 app.get('/api/configuracoes/token', obterTokenConfig);
+
+// Limpeza do staging após publicar (corpo pequeno, usa o json global)
+app.delete('/api/upload-imagem', excluirStaging);
 
 
 
