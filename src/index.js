@@ -7,6 +7,7 @@ import { publicar } from './routes/publicar.js';
 import { listarIas, atualizarIa, definirEmUso, salvarChave, removerChave, obterChave } from './routes/ias.js';
 import { listarPendentes, listarRejeitados, listarLiberados, liberarPost, marcarPostado, listarPublicados, reservarCodigo } from './routes/posts.js';
 import { obterConfig, salvarConfig, obterTokenConfig } from './routes/config.js';
+import { registrarDispositivo, removerDispositivo, enviarNotificacao } from './routes/notificacoes.js';
 import { listarLogs, registrarLog } from './routes/logs.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
@@ -66,6 +67,13 @@ app.post('/api/logs', registrarLog);
 // Configuração global (tbconfiguracoes, 1 linha) — idem, somente localhost
 app.get('/api/configuracoes', obterConfig);
 app.get('/api/configuracoes/token', obterTokenConfig);
+
+// Push FCM p/ moderadores — aberto (celular não é localhost),
+// com validação + rate-limit próprios em routes/notificacoes.js
+app.post('/api/notificacoes/dispositivo', registrarDispositivo);
+app.delete('/api/notificacoes/dispositivo', removerDispositivo);
+app.post('/api/notificacoes/enviar', enviarNotificacao);
+
 
 // Página inicial: http://localhost:PORTA mostra que a API está rodando
 app.get('/', (_req, res) => {

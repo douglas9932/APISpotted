@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { validateWithAI } from '../lib/ai.js';
 import { getSupabaseAdmin } from '../lib/supabaseAdmin.js';
 import { logErro } from '../lib/logger.js';
+import { enviarPushParaUsuario, trechoPush } from '../lib/push.js';
 
 // Correção F1: publicação sai do browser e passa pelo servidor com service-role.
 // O front NÃO fala mais com tbposts/storage diretamente.
@@ -204,6 +205,7 @@ export async function publicar(req, res) {
     return res.status(500).json({ ok: false, motivo: 'Erro inesperado. Tente novamente.' });
   }
   let insErr = null;
+  let postId = null;
   try {
     const rIns = await supa.from('tbposts').insert({
       mensagem: mensagem.trim(),
@@ -218,8 +220,9 @@ export async function publicar(req, res) {
       motivo_validacao: motivoValidacao,
       // regra (docs/tbposts_liberado.sql): validacao=false => true; true => NULL
       liberado_para_postar: necessitaValidacao ? null : true
-    });
+    }).select('id').single();
     insErr = rIns.error;
+    postId = !rIns.error && rIns.data ? rIns.data.id : null;
   } catch {
     logErro('tbposts insert failed on /api/publicar', null, { origem: '/api/publicar', ip });
     return res.status(502).json({ ok: false, motivo: 'Não foi possível salvar sua publicação. Tente novamente.' });
@@ -233,9 +236,18 @@ export async function publicar(req, res) {
     ? 'Sua mensagem contém imagem e será validada pelo responsável.'
     : (iaIndisponivel ? 'Não foi possível validar pela IA; sua mensagem será validada pelo responsável.' : null);
   // F7: motivo_validacao NÃO volta ao usuário (detalhe interno é só log/moderador).
-  return res.status(201).json({
+  res.status(201).json({
     ok: true,
     necessita_validacao: necessitaValidacao,
     ...(aviso ? { aviso } : {})
   });
+  // Push FCM best-effort APÓS responder (nunca atrasa nem quebra o publicar).
+  if (necessitaValidacao) {
+    enviarPushParaUsuario('moderador', 'Novo post para validar', trechoPush(mensagem.trim()), {
+      tipo: 'POST_SUSPEITO',
+      id: postId || ''
+    }).catch((err) => {
+      logErro('push pos-publicar falhou', err.message, { origem: '/api/publicar', ip });
+    });
+  }
 }
