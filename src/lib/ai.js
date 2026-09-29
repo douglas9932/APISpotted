@@ -5,8 +5,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getSupabaseAdmin } from './supabaseAdmin.js';
 import { obterChaveProvedor } from './crypto.js';
 
-// Moderação pela IA selecionada na tabela public.tbias (docs/tbias.sql):
-// a linha com em_uso=true é a IA em uso (só pode haver uma — índice único).
+// Moderação pelas IAs da tabela public.tbias (docs/tbias.sql):
+// 1º a linha com em_uso=true; em falha de infra/comunicação (sem créditos,
+// token vencido, timeout, rede, 429/5xx...), cai para a próxima ATIVA com
+// chave válida, em ordem de prioridade (da MAIOR para a MENOR).
 // Chave e seleção vêm SOMENTE do banco (modo estrito, sem fallback p/ env).
 // Sem linha válida, falha explícito (503 / revisão manual).
 
@@ -127,46 +129,85 @@ async function callGroq(message, { key, modelo, maxTokens }) {
 
 const CALLERS = { claude: callClaude, gemini: callGemini, groq: callGroq, openai: callOpenAI };
 
-// Fonte primária: a ÚNICA linha com em_uso=true (+ ativa e com chave na env).
-function configViaTabela() {
+// Fonte primária: a ÚNICA linha com em_uso=true (+ ativa e com chave).
+// Fallback: demais linhas ativas COM chave válida, em ordem de prioridade
+// (da MAIOR para a MENOR). Só entra quem tem caller implementado.
+async function listarCandidatas() {
   const supa = getSupabaseAdmin();
-  return supa
+  const { data, error } = await supa
     .from('tbias')
-    .select('provedor, env_key, api_key_enc, modelo, max_tokens')
-    .eq('em_uso', true)
+    .select('provedor, env_key, api_key_enc, modelo, max_tokens, prioridade, ativo, em_uso')
     .eq('ativo', true)
-    .limit(1)
-    .then(({ data, error }) => {
-      const p = !error && data && data[0];
-      const key = p && obterChaveProvedor(p); // banco criptografado > env
-      if (!p || !CALLERS[p.provedor] || !key) return null;
-      return {
-        provedor: p.provedor,
-        key,
-        modelo: p.modelo,
-        maxTokens: p.max_tokens || 150
-      };
+    .order('prioridade', { ascending: false });
+  if (error) throw error;
+  const lista = [];
+  for (const p of data || []) {
+    if (!p || !CALLERS[p.provedor]) continue;
+    const key = obterChaveProvedor(p); // banco criptografado; sem chave válida = pula
+    if (!key) continue;
+    lista.push({
+      provedor: p.provedor,
+      key,
+      modelo: p.modelo,
+      maxTokens: p.max_tokens || 150,
+      prioridade: p.prioridade ?? 0,
+      em_uso: p.em_uso === true
     });
+  }
+  // EM USO primeiro; depois as demais pela prioridade (já veio DESC do banco).
+  lista.sort((a, b) => Number(b.em_uso) - Number(a.em_uso) || (b.prioridade - a.prioridade));
+  return lista;
+}
+
+// Erro de infra/comunicação que justifica trocar de IA: sem créditos,
+// token vencido/inválido, rate-limit/quota, timeout, rede, 5xx, sobrecarga.
+// Qualquer exceção do provedor cai no fallback; a classificação abaixo serve
+// para log/diagnóstico (o detalhe nunca volta ao usuário — F7).
+function causaTroca(msg) {
+  const t = String(msg || '');
+  if (/credit|billing|balance|insufficient/i.test(t)) return 'sem créditos';
+  if (/expir|vencido|expired/i.test(t)) return 'token vencido/expirado';
+  if (/\b401\b|unauthorized|authentication|invalid.*api.*key|incorrect api key/i.test(t)) return 'falha de autenticação';
+  if (/\b429\b|rate.?limit|quota|resource.?exhausted/i.test(t)) return 'limite/quota excedido';
+  if (/\b402\b|payment/i.test(t)) return 'pagamento pendente';
+  if (/timeout após|timed out|timeouterror|abort/i.test(t)) return 'timeout';
+  if (/high demand|overloaded|overload|try again later|capacity|temporar/i.test(t)) return 'sobrecarga temporária';
+  if (/\b5\d\d\b|fetch failed|network|econn|enotfound|etimedout|eai_again|socket hang/i.test(t)) return 'falha de comunicação';
+  return 'falha no provedor';
 }
 
 export async function validateWithAI(message) {
-  let cfg = null;
+  let candidatas;
   try {
-    cfg = await configViaTabela();
+    candidatas = await listarCandidatas();
   } catch (err) {
     throw new Error(`tbias inacessível: ${err.message}`);
   }
-  if (!cfg) {
-    throw new Error('Nenhuma IA em uso (tbias sem linha em_uso=true ativa com chave válida)');
+  if (!candidatas.length) {
+    throw new Error('Nenhuma IA disponível (tbias sem linha ativa com chave válida)');
   }
   // Log apenas provedor/modelo (sem dados sensíveis da chave)
   if (process.env.NODE_ENV !== 'production') {
-    console.log(`[ai] provedor=${cfg.provedor} modelo=${cfg.modelo}`);
+    console.log(`[ai] ordem=${candidatas.map((c) => `${c.provedor}${c.em_uso ? '(em_uso)' : ''}:pri${c.prioridade}`).join(' > ')}`);
   }
-  // UMA única tentativa, na IA em uso. Falha aqui vira 503 (/validate) ou
-  // revisão manual (/publicar) — nunca tenta outro provedor sozinha.
-  const text = await CALLERS[cfg.provedor](message, cfg);
-  return parseAIResponse(text);
+  // Tenta a IA EM USO primeiro; em falha de infra/comunicação (sem créditos,
+  // token vencido, timeout, rede, 429/5xx...), cai para a próxima ativa COM
+  // token, em ordem de prioridade (maior -> menor). O resultado da moderação
+  // (mensagemvalida true/false) NUNCA dispara troca — só exceção do provedor.
+  let ultimoErro = null;
+  for (const cfg of candidatas) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`[ai] provedor=${cfg.provedor} modelo=${cfg.modelo}`);
+    }
+    try {
+      const text = await CALLERS[cfg.provedor](message, cfg);
+      return parseAIResponse(text);
+    } catch (err) {
+      ultimoErro = err;
+      console.error(`[ai] ${cfg.provedor} falhou (${causaTroca(err?.message)}): ${String(err?.message || err).slice(0, 200)}`);
+    }
+  }
+  throw ultimoErro instanceof Error ? ultimoErro : new Error(String(ultimoErro || 'Todas as IAs falharam'));
 }
 
 function parseAIResponse(text) {

@@ -59,13 +59,14 @@ function CAUSA_IA(iaErro) {
   const dur = ms ? ` (${Math.round(Number(ms[1]) / 1000)}s)` : '';
   if (/timeout após|timed out|timeouterror|abort/i.test(t)) return `Tempo esgotado na IA${dur}`;
   if (/credit|billing|balance|insufficient/i.test(t)) return 'Créditos da IA esgotados';
+  if (/expir|vencido/i.test(t)) return 'Token da IA vencido/expirado';
   if (/\b401\b|unauthorized|authentication/i.test(t)) return 'Falha de autenticação na IA';
   if (/\b429\b|rate.?limit|quota|resource.?exhausted/i.test(t)) return 'Limite da IA excedido';
   if (/high demand|overloaded|overload|try again later|capacity|temporar/i.test(t)) return 'IA sobrecarregada (demanda alta, temporário)';
   if (/\b402\b|payment/i.test(t)) return 'Pagamento da IA pendente';
   if (/\b400\b|invalid|not.?found/i.test(t)) return 'Configuração da IA inválida (modelo/parâmetros)';
   if (/\b5\d\d\b|fetch failed|network|econn|enotfound|etimedout|eai_again|socket hang/i.test(t)) return 'Erro temporário/falha de comunicação com a IA';
-  if (/tbias inacessível|nenhuma ia em uso/i.test(t)) return 'IA não configurada';
+  if (/tbias inacessível|nenhuma ia em uso|nenhuma ia disponível|todas as ias falharam/i.test(t)) return 'IA não configurada';
   return 'Falha na IA';
 }
 
