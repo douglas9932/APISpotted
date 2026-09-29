@@ -9,7 +9,7 @@ import { listarPendentes, listarRejeitados, listarLiberados, liberarPost, marcar
 import { obterConfig, salvarConfig, obterTokenConfig } from './routes/config.js';
 import { uploadStaging, excluirStaging } from './routes/staging.js';
 import { listarLogs, registrarLog } from './routes/logs.js';
-import { login, sessao } from './routes/auth.js';
+import { login, sessao, cadastrarLogin } from './routes/auth.js';
 import { criarRateLimit } from './lib/rateLimit.js';
 import { logErro, logInfo } from './lib/logger.js';
 
@@ -55,6 +55,8 @@ app.post('/api/validate', limiteValidate, validateMessage);
 app.post('/api/login', login);
 // Validação do token de sessão (48h) — 401 = painel volta p/ tela de login
 app.get('/api/sessao', sessao);
+// Cadastro de novo login — SOMENTE Admin (token Bearer de admin)
+app.post('/api/logins', cadastrarLogin);
 
 // Admin das IAs (tbias) — sem token, somente localhost (ver lib/adminAuth.js)
 // (bodies já parseados pelo express.json() global acima)
