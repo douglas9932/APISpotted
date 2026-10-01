@@ -91,6 +91,10 @@ function MOTIVO_VALIDACAO({ temImagem, iaIndisponivel, ai, iaErro }) {
 export async function publicar(req, res) {
   const ip = req.ip || req.socket?.remoteAddress || 'unknown';
 
+  // Anti-spam por IP (3/min + 10/h). NÃO é erro da IA — trocar de IA não libera.
+  // O 429 da IA (quota) faz failover silencioso em validateWithAI e, se todas
+  // falharem, cai em revisão humana abaixo (site não para). Só mostra 429 aqui
+  // por abuso de IP.
   if (RATE_EXCEDIDO(ip)) {
     return res.status(429).json({ ok: false, motivo: 'Limite de publicações atingido. Aguarde e tente novamente.' });
   }
@@ -114,8 +118,12 @@ export async function publicar(req, res) {
   let iaErro = null;
   if (!temImagem) {
     try {
+      // Failover silencioso: tenta em_uso e depois ativas por prioridade.
+      // Intermediárias com 429/erro não mostram nada; só a última propaga.
       ai = await validateWithAI(mensagem.trim());
     } catch (err) {
+      // Site não para: IA indisponível (mesmo todas com 429) vai para revisão
+      // humana (201 com aviso). Nunca retorna 429 da IA ao usuário aqui.
       // motivo detalhado só no log do servidor (nunca na resposta — F7)
       logErro('AI validation error on /api/publicar', err.message, { origem: '/api/publicar', ip });
       iaIndisponivel = true;

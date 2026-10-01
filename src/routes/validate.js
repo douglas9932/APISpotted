@@ -20,12 +20,21 @@ export async function validateMessage(req, res) {
       motivo_validacao: necessita ? (resultado.motivo_suspeita || 'Sinalizado como suspeito pela IA — revisão humana.') : null
     });
   } catch (err) {
-    // F3 fail-closed: IA indisponível (créditos, rede, 429/503) NÃO libera
-    // a mensagem. Detalhe interno só no log, nunca na resposta (F7).
-    // motivo detalhado só no log do servidor (nunca na resposta — F7)
-    // Espelha também em tblogs (best-effort) com o IP da conexão.
+    // F3 fail-closed: IA indisponível NÃO libera a mensagem. Detalhe só no log (F7).
+    // Failover já tentou todas as IAs em silêncio; este catch é SÓ da última.
+    // 429 ao usuário SOMENTE quando todas as IAs estouraram quota (E_ALL_RATE_LIMITED).
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     logErro('AI validation error', err.message, { origem: '/api/validate', ip });
+    if (err?.code === 'E_ALL_RATE_LIMITED') {
+      return res.status(429).json({
+        mensagemvalida: false,
+        motivorecusa: 'Limite de publicações atingido. Aguarde e tente novamente.',
+        suspeita: false,
+        motivo_suspeita: null,
+        necessita_validacao: false,
+        motivo_validacao: null
+      });
+    }
     return res.status(503).json({
       mensagemvalida: false,
       motivorecusa: 'Serviço de validação indisponível. Tente novamente em instantes.',

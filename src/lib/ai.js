@@ -159,6 +159,15 @@ async function listarCandidatas() {
   return lista;
 }
 
+// Failover silencioso: QUALQUER exceção do provedor (429, sem créditos,
+// token, timeout, rede, 5xx...) tenta a próxima IA ativa com token válido.
+// Nada é mostrado ao usuário nas tentativas intermediárias — só log.
+// Só o erro da ÚLTIMA IA disponível é propagado (com código E_ALL_RATE_LIMITED
+// quando todas falharam por 429/quota, para o caller decidir a mensagem).
+function isRateLimitErro(msg) {
+  return /\b429\b|rate.?limit|quota|resource.?exhausted/i.test(String(msg || ''));
+}
+
 // Erro de infra/comunicação que justifica trocar de IA: sem créditos,
 // token vencido/inválido, rate-limit/quota, timeout, rede, 5xx, sobrecarga.
 // Qualquer exceção do provedor cai no fallback; a classificação abaixo serve
@@ -195,6 +204,7 @@ export async function validateWithAI(message) {
   // token, em ordem de prioridade (maior -> menor). O resultado da moderação
   // (mensagemvalida true/false) NUNCA dispara troca — só exceção do provedor.
   let ultimoErro = null;
+  let falhasRateLimit = 0;
   for (const cfg of candidatas) {
     if (process.env.NODE_ENV !== 'production') {
       console.log(`[ai] provedor=${cfg.provedor} modelo=${cfg.modelo}`);
@@ -204,10 +214,18 @@ export async function validateWithAI(message) {
       return parseAIResponse(text);
     } catch (err) {
       ultimoErro = err;
-      console.error(`[ai] ${cfg.provedor} falhou (${causaTroca(err?.message)}): ${String(err?.message || err).slice(0, 200)}`);
+      if (isRateLimitErro(err?.message)) falhasRateLimit++;
+      // Silencioso ao usuário: só log interno, tenta a próxima IA.
+      console.error(`[ai] ${cfg.provedor} falhou (${causaTroca(err?.message)}), tentando próxima: ${String(err?.message || err).slice(0, 200)}`);
     }
   }
-  throw ultimoErro instanceof Error ? ultimoErro : new Error(String(ultimoErro || 'Todas as IAs falharam'));
+  const base = ultimoErro instanceof Error ? ultimoErro : new Error(String(ultimoErro || 'Todas as IAs falharam'));
+  // Marca quando TODAS as candidatas falharam por 429/quota — caller mostra
+  // mensagem de limite só neste caso (última disponível com problema).
+  if (candidatas.length > 0 && falhasRateLimit === candidatas.length) {
+    base.code = 'E_ALL_RATE_LIMITED';
+  }
+  throw base;
 }
 
 function parseAIResponse(text) {
